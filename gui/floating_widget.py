@@ -6,12 +6,43 @@ import tkinter as tk
 from tkinter import messagebox
 from PIL import Image, ImageTk
 
+# Enable DPI awareness on Windows so coordinates match physical screen pixels exactly
+if sys.platform == "win32":
+    try:
+        import ctypes
+        try:
+            ctypes.windll.shcore.SetProcessDpiAwareness(2)  # Per-Monitor V2
+        except Exception:
+            ctypes.windll.user32.SetProcessDPIAware()
+    except Exception:
+        pass
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
 from gui.feedback_bubble import FeedbackBubble
 from automation.profile_helper import get_installed_chrome_profiles
 
 TRANSPARENT_KEY = "#010101"
+
+def get_desktop_bottom_right(win_w=150, win_h=175, margin_x=30, margin_y=20):
+    """
+    Calculates the exact bottom-right coordinates on the user's desktop,
+    taking Windows DPI scaling and taskbar work area into account.
+    """
+    try:
+        import ctypes
+        import ctypes.wintypes
+        user32 = ctypes.windll.user32
+        rect = ctypes.wintypes.RECT()
+        # SPI_GETWORKAREA = 0x0030: returns rect of desktop excluding the taskbar
+        if user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(rect), 0):
+            x = rect.right - win_w - margin_x
+            y = rect.bottom - win_h - margin_y
+            if x > 100 and y > 100:
+                return x, y
+    except Exception:
+        pass
+    return None, None
 
 class FloatingWidget:
     """Cute animated desktop cat companion for the voice listener."""
@@ -29,6 +60,7 @@ class FloatingWidget:
         self.root = tk.Tk()
         self.root.title("Desktop Cat Voice Listener")
         self.root.overrideredirect(True)
+        
         # Desktop-only presence (does not hover over other apps)
         settings = config.load_settings()
         self.always_on_top = settings.get("always_on_top", False)
@@ -47,7 +79,6 @@ class FloatingWidget:
                 pass
                 
         # Widget Dimensions
-        # Extra vertical space allows the cat to jump smoothly and show ear ripples
         self.win_w = 150
         self.win_h = 175
         self.base_cat_w = 108
@@ -68,14 +99,16 @@ class FloatingWidget:
         # Load and prepare cat sprites
         self._load_sprites()
         
-        # Smooth opening: start invisible, position at bottom-right corner, and fade in
+        # Smooth opening: start invisible, position strictly at bottom-right corner, and fade in
         self.root.attributes("-alpha", 0.0)
         self._init_position()
         self.root.after(40, self.fade_in)
         
-        # Dragging & click tracking
-        self._drag_start_x = 0
-        self._drag_start_y = 0
+        # Dragging & click tracking using screen-relative offsets
+        self._drag_offset_x = 0
+        self._drag_offset_y = 0
+        self._down_x = 0
+        self._down_y = 0
         self._has_moved = False
         
         # Bindings
@@ -115,37 +148,28 @@ class FloatingWidget:
                 fallback = os.path.join(assets, "cat_clean.png")
                 self.pil_sprites[name] = Image.open(fallback).convert("RGBA")
 
-    def _init_position(self):
-        """Loads saved position or defaults to the bottom-right corner of the desktop."""
-        settings = config.load_settings()
-        screen_w = self.root.winfo_screenwidth()
-        screen_h = self.root.winfo_screenheight()
-        
-        # Bottom-right corner baseline (above the Windows taskbar)
-        default_x = screen_w - self.win_w - 40
-        default_y = screen_h - self.win_h - 85
-        
-        saved_x = settings.get("window_x")
-        saved_y = settings.get("window_y")
-        
-        # Only use saved coordinates if valid and not corrupted to 0,0
-        if saved_x is not None and saved_y is not None and saved_x > 50 and saved_y > 50:
-            x = max(10, min(saved_x, screen_w - self.win_w - 10))
-            y = max(10, min(saved_y, screen_h - self.win_h - 10))
-        else:
-            x = default_x
-            y = default_y
-            
+    def _position_bottom_right(self):
+        """Positions cat strictly in the bottom-right corner of the desktop above the taskbar."""
+        x, y = get_desktop_bottom_right(self.win_w, self.win_h, margin_x=30, margin_y=20)
+        if x is None or y is None:
+            screen_w = self.root.winfo_screenwidth()
+            screen_h = self.root.winfo_screenheight()
+            x = screen_w - self.win_w - 40
+            y = screen_h - self.win_h - 85
         self.root.geometry(f"{self.win_w}x{self.win_h}+{x}+{y}")
+        self.root.update_idletasks()
+
+    def _init_position(self):
+        """Initializes and anchors cat permanently to the bottom-right corner."""
+        self._position_bottom_right()
+        # Schedule additional assertions to guard against Windows DWM startup race conditions
+        self.root.after(30, self._position_bottom_right)
+        self.root.after(120, self._position_bottom_right)
+        self.root.after(350, self._position_bottom_right)
 
     def show_in_bottom_right(self, smooth_wake=False):
         """Positions cat strictly in the bottom-right corner of the desktop above the taskbar."""
-        screen_w = self.root.winfo_screenwidth()
-        screen_h = self.root.winfo_screenheight()
-        target_x = screen_w - self.win_w - 40
-        target_y = screen_h - self.win_h - 85
-        self.root.geometry(f"{self.win_w}x{self.win_h}+{target_x}+{target_y}")
-        self._save_position(explicit_x=target_x, explicit_y=target_y)
+        self._position_bottom_right()
         
         if smooth_wake:
             self.fade_in()
@@ -179,39 +203,22 @@ class FloatingWidget:
         except Exception:
             self.root.destroy()
 
-    def _save_position(self, explicit_x=None, explicit_y=None):
-        """Saves current desktop position with guard against unmapped 0,0."""
-        settings = config.load_settings()
-        if explicit_x is not None and explicit_y is not None:
-            settings["window_x"] = explicit_x
-            settings["window_y"] = explicit_y
-            config.save_settings(settings)
-        else:
-            cur_x = self.root.winfo_x()
-            cur_y = self.root.winfo_y()
-            if cur_x > 50 and cur_y > 50:
-                settings["window_x"] = cur_x
-                settings["window_y"] = cur_y
-                config.save_settings(settings)
-
     def _on_mouse_down(self, event):
-        self._drag_start_x = event.x
-        self._drag_start_y = event.y
+        self._drag_offset_x = event.x_root - self.root.winfo_x()
+        self._drag_offset_y = event.y_root - self.root.winfo_y()
+        self._down_x = event.x_root
+        self._down_y = event.y_root
         self._has_moved = False
 
     def _on_mouse_drag(self, event):
-        dx = event.x - self._drag_start_x
-        dy = event.y - self._drag_start_y
-        if abs(dx) > 3 or abs(dy) > 3:
+        if abs(event.x_root - self._down_x) > 4 or abs(event.y_root - self._down_y) > 4:
             self._has_moved = True
-            new_x = self.root.winfo_x() + dx
-            new_y = self.root.winfo_y() + dy
+            new_x = event.x_root - self._drag_offset_x
+            new_y = event.y_root - self._drag_offset_y
             self.root.geometry(f"+{new_x}+{new_y}")
 
     def _on_mouse_up(self, event):
-        if self._has_moved:
-            self._save_position()
-        else:
+        if not self._has_moved:
             # Click detected -> Toggle Voice Listener!
             if self.on_toggle_listen:
                 self.on_toggle_listen()
@@ -294,13 +301,11 @@ class FloatingWidget:
         # --- 2. PROCESSING STATE (Head tilted, curious ears, thinking sparkles) ---
         elif self.state == self.STATE_PROCESSING:
             current_sprite = "cat_ear_both"
-            # Gentle curious bob
             y_offset = -int(3.0 * math.sin(self._frame_count * 0.18))
 
         # --- 3. SUCCESS STATE (Happy celebratory bounce & blushed eyes) ---
         elif self.state == self.STATE_SUCCESS:
             current_sprite = "cat_happy"
-            # Cheerful quick bounce
             hop = abs(math.sin(self._frame_count * 0.35))
             y_offset = -int(16.0 * hop)
             scale_h = 1.0 + (0.05 * hop)
@@ -308,12 +313,10 @@ class FloatingWidget:
 
         # --- 4. IDLE STATE (Gentle breathing & natural blinking) ---
         else:
-            # Subtle breathing cycle (period ~3s)
             breath = math.sin(self._frame_count * 0.07) * 0.02
             scale_h = 1.0 + breath
             scale_w = 1.0 - (breath * 0.5)
             
-            # Blink logic
             self._blink_counter += 1
             if self._is_blinking:
                 current_sprite = "cat_blink"
@@ -322,7 +325,6 @@ class FloatingWidget:
                     self._blink_counter = 0
             else:
                 current_sprite = "cat_neutral"
-                # Blink roughly every 100-140 frames (~3-4.5 seconds)
                 if self._blink_counter > 110 and random.random() < 0.15:
                     self._is_blinking = True
                     self._blink_counter = 0
@@ -331,16 +333,14 @@ class FloatingWidget:
         draw_w = int(self.base_cat_w * scale_w)
         draw_h = int(self.base_cat_h * scale_h)
         
-        # Center horizontally, place feet firmly on ground baseline
         draw_x = self.center_x - (draw_w // 2)
         draw_y = int(self.ground_y - draw_h + y_offset)
         
-        # Draw the Cat Sprite!
         photo = self._get_scaled_photo(current_sprite, draw_w, draw_h)
-        self._current_photo = photo  # Prevent garbage collection
+        self._current_photo = photo
         self.canvas.create_image(draw_x, draw_y, anchor="nw", image=photo)
         
-        # Draw overlays on top of the cat
+        # Overlays
         if self.state == self.STATE_LISTENING:
             self._draw_ear_listening_waves(draw_x, draw_y, draw_w, draw_h, energy)
         elif self.state == self.STATE_PROCESSING:
@@ -348,38 +348,32 @@ class FloatingWidget:
         elif self.state == self.STATE_SUCCESS:
             self._draw_success_sparkles(draw_x, draw_y, draw_w, draw_h)
         
-        # Schedule next animation frame (~33ms = 30 FPS)
         self.root.after(33, self._animate)
 
     def _draw_ear_listening_waves(self, draw_x, draw_y, draw_w, draw_h, energy):
         """Draws animated listening sound ripples emitting outward from cat ears."""
         self._ear_wave_phase = (self._ear_wave_phase + 0.12) % 1.0
         
-        # Precision ear tip coordinates proportional to cat bounding box (377x455)
         left_ear_x = draw_x + int(draw_w * (68.0 / 377.0))
         left_ear_y = draw_y + int(draw_h * (18.0 / 455.0))
         
         right_ear_x = draw_x + int(draw_w * (306.0 / 377.0))
         right_ear_y = draw_y + int(draw_h * (18.0 / 455.0))
         
-        # Colors: Glowing electric cyan / vibrant gold
         colors = ["#38bdf8", "#06b6d4", "#fbbf24"]
         
-        # Draw 3 expanding acoustic ripple arcs from each ear tip
         for i in range(3):
             wave_prog = (self._ear_wave_phase + (i * 0.33)) % 1.0
             r = 6 + (wave_prog * 22)
             color = colors[i % len(colors)]
             width = max(1, int(3 * (1.0 - wave_prog)))
             
-            # Left ear listening arc (curving up and outward to the left)
             self.canvas.create_arc(
                 left_ear_x - r, left_ear_y - r, left_ear_x + r, left_ear_y + r,
                 start=85, extent=125, style=tk.ARC,
                 outline=color, width=width
             )
             
-            # Right ear listening arc (curving up and outward to the right)
             self.canvas.create_arc(
                 right_ear_x - r, right_ear_y - r, right_ear_x + r, right_ear_y + r,
                 start=-30, extent=125, style=tk.ARC,
@@ -404,14 +398,12 @@ class FloatingWidget:
         head_top_y = draw_y - 8
         center_x = draw_x + (draw_w // 2)
         
-        # Note 1 (left)
         n1_y = head_top_y - (self._frame_count % 18)
         self.canvas.create_text(
             center_x - 32, n1_y,
             text="♪", fill="#10b981", font=("Segoe UI", 12, "bold")
         )
         
-        # Note 2 (right)
         n2_y = head_top_y - ((self._frame_count + 8) % 18)
         self.canvas.create_text(
             center_x + 32, n2_y,
@@ -427,11 +419,11 @@ class FloatingWidget:
         menu = tk.Menu(self.root, tearoff=0, bg="#0f172a", fg="#f8fafc", activebackground="#0284c7", activeforeground="#ffffff")
         
         menu.add_command(label="🎙️ Start Listening", command=self.on_toggle_listen)
+        menu.add_command(label="📍 Reset to Bottom-Right Corner", command=self._position_bottom_right)
         menu.add_separator()
         menu.add_command(label="📋 Voice Commands Guide...", command=self._show_cheat_sheet)
         menu.add_command(label="👤 Chrome Profiles...", command=self._show_profiles_dialog)
         
-        # Always on Top toggle
         settings = config.load_settings()
         topmost = settings.get("always_on_top", False)
         top_text = "✓ Always on Top" if topmost else "  Always on Top"
@@ -459,7 +451,7 @@ class FloatingWidget:
         """Pops up voice command cheat sheet."""
         sheet = tk.Toplevel(self.root)
         sheet.title("Voice Commands Guide")
-        sheet.geometry("450x500")
+        sheet.geometry("450x520")
         sheet.configure(bg="#0f172a")
         sheet.attributes("-topmost", True)
         
@@ -471,18 +463,20 @@ class FloatingWidget:
             "  • 'hi' / 'hello' / 'hey' → Hi, how can I help you?\n"
             "  • 'good morning', 'thanks', 'bye', 'what can you do'\n"
             "  Actions like open YouTube stay silent.\n\n"
-            "▶ YouTube Commands:\n"
-            "  • 'open youtube' (opens in Chrome tab; add 'in another window' for new window)\n  • 'open linkedin', 'open github', 'open chatgpt'\n  • 'open xbox app', 'open whatsapp app', 'open steam'\n"
-            "  • 'search [query] on youtube'\n\n"
+            "▶ YouTube & Websites (Chrome Tabs & Windows):\n"
+            "  • 'open youtube' (opens in current Chrome as a tab)\n"
+            "  • 'open youtube in another window'\n"
+            "  • 'search [query] on youtube'\n"
+            "  • 'open linkedin', 'open github', 'open chatgpt'\n"
+            "  • 'open linkedin in a new window'\n\n"
+            "▶ PC Desktop Apps (Native Applications):\n"
+            "  • 'open xbox app' / 'open xbox'\n"
+            "  • 'open whatsapp app' / 'open whatsapp'\n"
+            "  • 'open steam', 'open spotify', 'open discord'\n"
+            "  • 'open calculator', 'open notepad', 'open cmd'\n\n"
             "▶ Chrome & Profile Commands:\n"
             "  • 'open chrome and then click my profile'\n"
-            "  • 'open chrome and click my profile'\n"
-            "  • 'click my profile' / 'open my profile'\n"
-            "  • 'open vit profile' / 'open college profile'\n\n"
-            "▶ Apps & Navigation:\n"
-            "  • 'open calculator', 'open notepad', 'open cmd'\n"
-            "  • 'open github', 'open chatgpt', 'open reddit'\n"
-            "  • 'search [query] on google'\n\n"
+            "  • 'click my profile' / 'open my profile'\n\n"
             "▶ System Controls:\n"
             "  • 'volume up', 'volume down', 'mute'\n"
             "  • 'take screenshot' (opens snipping tool)\n"
