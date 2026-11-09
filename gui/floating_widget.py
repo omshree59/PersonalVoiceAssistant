@@ -119,8 +119,6 @@ class FloatingWidget:
         
         # Feedback Toast Bubble
         self.bubble = FeedbackBubble(self.root)
-        if not self.always_on_top:
-            self.root.lower()
         
         # Animation State Variables
         self._frame_count = 0
@@ -176,8 +174,6 @@ class FloatingWidget:
             self.set_state(self.STATE_SUCCESS)
             self.show_feedback("🐱 I'm here!", "Click me anytime to give a command.", color="#fbbf24", auto_hide=3.0)
             self.root.after(1100, lambda: self.set_state(self.STATE_IDLE))
-        elif not self.always_on_top:
-            self.root.lower()
 
     def fade_in(self, target_alpha=1.0, step=0.12):
         """Smoothly fades in the widget window."""
@@ -227,8 +223,6 @@ class FloatingWidget:
         """Updates animation state: IDLE, LISTENING, PROCESSING, SUCCESS."""
         self.state = new_state
         self._jump_phase = 0.0
-        if new_state == self.STATE_IDLE and not getattr(self, "always_on_top", False):
-            self.root.lower()
 
     def _get_scaled_photo(self, sprite_name, width, height):
         """Resizes and caches PhotoImage for smooth performance."""
@@ -251,6 +245,7 @@ class FloatingWidget:
         """Main rendering loop running at ~30 FPS."""
         self._frame_count += 1
         self.canvas.delete("all")
+        self.canvas.create_rectangle(0, 0, self.win_w, self.win_h, fill=TRANSPARENT_KEY, outline="")
         
         energy = 0.0
         if self.get_audio_energy:
@@ -444,8 +439,6 @@ class FloatingWidget:
         self.root.attributes("-topmost", new_val)
         if hasattr(self, "bubble") and hasattr(self.bubble, "window"):
             self.bubble.window.attributes("-topmost", new_val)
-        if not new_val:
-            self.root.lower()
 
     def _show_cheat_sheet(self):
         """Pops up voice command cheat sheet."""
