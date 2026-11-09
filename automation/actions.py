@@ -4,6 +4,8 @@ import subprocess
 import webbrowser
 import urllib.parse
 import time
+import json
+import re
 import pyautogui
 pyautogui.FAILSAFE = False
 
@@ -12,6 +14,42 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import config
 from automation.profile_helper import match_profile, get_installed_chrome_profiles
+
+_START_APPS_CACHE = None
+
+def get_installed_windows_apps():
+    """
+    Returns a dict mapping lowercase application names to their (display_name, AppID) from Get-StartApps.
+    Cached for fast subsequent lookups.
+    """
+    global _START_APPS_CACHE
+    if _START_APPS_CACHE is not None:
+        return _START_APPS_CACHE
+
+    apps = {}
+    try:
+        cmd = [
+            "powershell",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "Get-StartApps | ConvertTo-Json -Compress"
+        ]
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+        if res.returncode == 0 and res.stdout.strip():
+            data = json.loads(res.stdout)
+            if isinstance(data, dict):
+                data = [data]
+            for item in data:
+                name = item.get("Name", "").strip()
+                appid = item.get("AppID", "").strip()
+                if name and appid:
+                    apps[name.lower()] = (name, appid)
+    except Exception as e:
+        print(f"[Actions] Error querying Get-StartApps: {e}")
+
+    _START_APPS_CACHE = apps
+    return apps
 
 def launch_process(command_list):
     """Safely launches a background detached subprocess on Windows."""
@@ -24,21 +62,20 @@ def launch_process(command_list):
     except Exception as e:
         print(f"[Actions] Subprocess launch failed: {e}")
         try:
-            # Fallback to os.startfile or standard Popen
             subprocess.Popen(command_list, shell=True)
             return True
         except Exception as e2:
             print(f"[Actions] Shell fallback failed: {e2}")
             return False
 
-def open_youtube(query=None):
+def open_youtube(query=None, new_window=False):
     """
     Opens YouTube. If query is provided, opens search results.
-    Uses Chrome standalone app mode if configured for an app-like experience.
+    By default opens as a new tab in the running Chrome window (or a new window if specified).
     """
     settings = config.load_settings()
     chrome_path = settings.get("chrome_path")
-    app_mode = settings.get("youtube_app_mode", True)
+    app_mode = settings.get("youtube_app_mode", False)
     
     if query:
         encoded = urllib.parse.quote_plus(query)
@@ -48,9 +85,11 @@ def open_youtube(query=None):
         
     if chrome_path and os.path.exists(chrome_path):
         if app_mode:
-            # Standalone App window (looks like dedicated YouTube desktop app)
             launch_process([chrome_path, f"--app={target_url}"])
             return f"Opening YouTube Desktop ({'Search: ' + query if query else 'Home'})"
+        elif new_window:
+            launch_process([chrome_path, "--new-window", target_url])
+            return f"Opening YouTube in new Chrome window ({'Search: ' + query if query else 'Home'})"
         else:
             launch_process([chrome_path, target_url])
             return f"Opening YouTube in Chrome ({'Search: ' + query if query else 'Home'})"
@@ -87,82 +126,133 @@ def click_chrome_profile(profile_query="Default"):
     dir_name, info = match_profile(profile_query)
     profile_name = info.get("name", dir_name)
     
-    # We can bring Chrome to focus or launch directly with profile
     settings = config.load_settings()
     chrome_path = settings.get("chrome_path")
     
     if chrome_path and os.path.exists(chrome_path):
-        # Direct profile directory launch is 100% reliable in Chromium
         launch_process([chrome_path, f"--profile-directory={dir_name}"])
-        # Give brief delay and ensure window is active
         time.sleep(0.5)
         return f"Selected profile: {profile_name}"
     else:
         return "Chrome not found to select profile."
 
-def open_google_search(query):
-    """Searches Google for the given query."""
+def open_google_search(query, new_window=False):
+    """Searches Google for the given query in Chrome."""
     encoded = urllib.parse.quote_plus(query)
     url = f"https://www.google.com/search?q={encoded}"
     settings = config.load_settings()
     chrome_path = settings.get("chrome_path")
     if chrome_path and os.path.exists(chrome_path):
-        launch_process([chrome_path, url])
+        if new_window:
+            launch_process([chrome_path, "--new-window", url])
+        else:
+            launch_process([chrome_path, url])
     else:
         webbrowser.open(url)
     return f"Searching Google for: '{query}'"
 
-def open_website(url, name=None):
-    """Opens any specified website."""
+def open_website(url, name=None, new_window=False):
+    """Opens any specified website in Chrome (as a tab or new window)."""
     if not url.startswith("http"):
         url = "https://" + url
     settings = config.load_settings()
     chrome_path = settings.get("chrome_path")
     if chrome_path and os.path.exists(chrome_path):
-        launch_process([chrome_path, url])
+        if new_window:
+            launch_process([chrome_path, "--new-window", url])
+        else:
+            launch_process([chrome_path, url])
     else:
         webbrowser.open(url)
     return f"Opening {name or url}"
 
 def open_windows_app(app_name):
-    """Opens common Windows apps by name."""
-    app_lower = app_name.lower().strip()
-    
-    app_map = {
-        "notepad": "notepad.exe",
-        "calculator": "calc.exe",
-        "calc": "calc.exe",
-        "explorer": "explorer.exe",
-        "file explorer": "explorer.exe",
-        "files": "explorer.exe",
-        "cmd": "cmd.exe",
-        "command prompt": "cmd.exe",
-        "terminal": "wt.exe",
-        "powershell": "powershell.exe",
-        "task manager": "taskmgr.exe",
-        "settings": "ms-settings:",
-        "camera": "microsoft.windows.camera:",
-        "snipping tool": "snippingtool.exe",
-        "paint": "mspaint.exe",
+    """
+    Opens common and installed Windows applications by name or AppID.
+    Supports native apps like WhatsApp, Xbox, Steam, Spotify, VS Code, Calculator, etc.
+    Returns (success: bool, message: str).
+    """
+    clean = app_name.lower().strip()
+    clean = re.sub(r"^the\s+", "", clean)
+    clean = re.sub(r"\s+app(?:lication)?$", "", clean).strip()
+
+    if not clean:
+        return False, "No application name specified."
+
+    # 1. Known high-priority application mappings & URI schemes
+    known_apps = {
+        "whatsapp": ("WhatsApp", "shell:AppsFolder\\5319275A.WhatsAppDesktop_cv1g1gvanyjgm!App"),
+        "xbox": ("Xbox", "shell:AppsFolder\\Microsoft.GamingApp_8wekyb3d8bbwe!Microsoft.Xbox.App"),
+        "spotify": ("Spotify", "spotify:"),
+        "discord": ("Discord", "discord:"),
+        "steam": ("Steam", "steam:"),
+        "notepad": ("Notepad", "notepad.exe"),
+        "calculator": ("Calculator", "calc.exe"),
+        "calc": ("Calculator", "calc.exe"),
+        "explorer": ("File Explorer", "explorer.exe"),
+        "file explorer": ("File Explorer", "explorer.exe"),
+        "files": ("File Explorer", "explorer.exe"),
+        "cmd": ("Command Prompt", "cmd.exe"),
+        "command prompt": ("Command Prompt", "cmd.exe"),
+        "terminal": ("Windows Terminal", "wt.exe"),
+        "windows terminal": ("Windows Terminal", "wt.exe"),
+        "powershell": ("PowerShell", "powershell.exe"),
+        "task manager": ("Task Manager", "taskmgr.exe"),
+        "taskmgr": ("Task Manager", "taskmgr.exe"),
+        "settings": ("Windows Settings", "ms-settings:"),
+        "camera": ("Camera", "microsoft.windows.camera:"),
+        "snipping tool": ("Snipping Tool", "snippingtool.exe"),
+        "snip": ("Snipping Tool", "snippingtool.exe"),
+        "paint": ("Paint", "mspaint.exe"),
+        "vs code": ("Visual Studio Code", "code"),
+        "vscode": ("Visual Studio Code", "code"),
+        "visual studio code": ("Visual Studio Code", "code"),
     }
-    
-    target = app_map.get(app_lower)
-    if target:
+
+    if clean in known_apps:
+        display_name, target = known_apps[clean]
         try:
-            if target.startswith("ms-"):
-                os.system(f"start {target}")
+            if target.startswith("shell:") or (":" in target and not (len(target) > 1 and target[1] == ":")):
+                os.startfile(target)
             else:
                 subprocess.Popen([target], shell=True)
-            return f"Opening {app_name.title()}"
+            return True, f"Opening {display_name}"
         except Exception as e:
-            return f"Failed to open {app_name}: {e}"
-            
-    # Generic start
+            try:
+                subprocess.Popen(f"start {target}", shell=True)
+                return True, f"Opening {display_name}"
+            except Exception as e2:
+                print(f"[Actions] Failed to launch known app {display_name}: {e2}")
+
+    # 2. Check installed Windows StartApps dynamically
+    installed = get_installed_windows_apps()
+    
+    # Exact match in installed apps
+    if clean in installed:
+        disp, app_id = installed[clean]
+        try:
+            os.startfile(f"shell:AppsFolder\\{app_id}")
+            return True, f"Opening {disp}"
+        except Exception:
+            subprocess.Popen(["explorer.exe", f"shell:AppsFolder\\{app_id}"])
+            return True, f"Opening {disp}"
+
+    # Partial / substring match in installed apps
+    for app_key, (disp, app_id) in installed.items():
+        if clean == app_key or clean in app_key or app_key.startswith(clean):
+            try:
+                os.startfile(f"shell:AppsFolder\\{app_id}")
+                return True, f"Opening {disp}"
+            except Exception:
+                subprocess.Popen(["explorer.exe", f"shell:AppsFolder\\{app_id}"])
+                return True, f"Opening {disp}"
+
+    # 3. Generic Windows start fallback
     try:
-        subprocess.Popen(["start", app_name], shell=True)
-        return f"Launching {app_name}"
+        subprocess.Popen(f"start {clean}", shell=True)
+        return True, f"Launching {clean.title()}"
     except Exception as e:
-        return f"Could not launch {app_name}"
+        return False, f"Could not launch application: {clean}"
 
 def control_volume(action):
     """Controls volume (up, down, mute)."""

@@ -18,7 +18,7 @@ from automation.actions import (
     minimize_all_windows
 )
 
-# Common websites quick lookup
+# Common websites quick lookup (WhatsApp and Spotify default to desktop apps; web versions require explicit 'web')
 KNOWN_WEBSITES = {
     "github": "https://github.com",
     "google": "https://google.com",
@@ -27,14 +27,14 @@ KNOWN_WEBSITES = {
     "reddit": "https://reddit.com",
     "gmail": "https://mail.google.com",
     "netflix": "https://netflix.com",
-    "spotify": "https://open.spotify.com",
     "twitter": "https://x.com",
     "x": "https://x.com",
     "instagram": "https://instagram.com",
-    "whatsapp": "https://web.whatsapp.com",
     "linkedin": "https://linkedin.com",
     "twitch": "https://twitch.tv",
     "amazon": "https://amazon.com",
+    "whatsapp web": "https://web.whatsapp.com",
+    "spotify web": "https://open.spotify.com",
 }
 
 def clean_transcript(text):
@@ -84,7 +84,7 @@ def conversational_reply(text):
         "what's your name",
         "what is your name",
     ):
-        return "I'm your desktop assistant. Try open YouTube, open Chrome, or volume up."
+        return "I'm your desktop assistant. Try open YouTube, open LinkedIn, or open Xbox app."
     return None
 
 def interpret(full_transcript):
@@ -139,12 +139,16 @@ def split_chained_commands(text):
 def execute_single_command(cmd_text):
     """
     Executes a single voice command. Returns (success: bool, response_message: str).
+    Websites open in Chrome tabs (or a new Chrome window if requested).
+    Desktop applications (Xbox, WhatsApp, Steam, etc.) open native Windows apps.
     """
     t = clean_transcript(cmd_text)
     if not t:
         return False, "No speech detected"
+
+    wants_new_window = any(p in t for p in ["new window", "another window", "separate window"])
         
-    # 1. YouTube Commands
+    # 1. YouTube Commands (opens in Chrome tab, or new window if specified)
     if "youtube" in t:
         # Search on YouTube: "search python tutorial on youtube" or "youtube search lofi"
         search_match = re.search(r"(?:search|find|play)\s+(.+?)\s+(?:on|in)\s+youtube", t)
@@ -152,16 +156,15 @@ def execute_single_command(cmd_text):
             search_match = re.search(r"youtube\s+(?:search|find|play)\s+(.+)", t)
         if search_match:
             query = search_match.group(1).strip()
-            msg = open_youtube(query=query)
+            msg = open_youtube(query=query, new_window=wants_new_window)
             return True, msg
             
         # Just open YouTube: "open youtube", "launch youtube app", "go to youtube"
         if any(w in t for w in ["open", "launch", "start", "go to", "show"]) or t == "youtube":
-            msg = open_youtube()
+            msg = open_youtube(new_window=wants_new_window)
             return True, msg
 
     # 2. Chrome and Profile Commands
-    # e.g. "open chrome and then click my profile" or "click my profile" or "open my profile"
     if "profile" in t or "chrome" in t:
         # User says: "click my profile" / "select my profile" / "click profile"
         if any(w in t for w in ["click", "select", "choose", "switch"]):
@@ -179,22 +182,22 @@ def execute_single_command(cmd_text):
             return True, msg
 
     # 3. Google Search
-    # "search python asyncio on google" or "google how to cook pasta"
     google_match = re.search(r"(?:search|find)\s+(.+?)\s+(?:on|in)\s+google", t)
     if google_match:
         query = google_match.group(1).strip()
-        msg = open_google_search(query)
+        msg = open_google_search(query, new_window=wants_new_window)
         return True, msg
         
     if t.startswith("google "):
         query = t[7:].strip()
-        msg = open_google_search(query)
+        msg = open_google_search(query, new_window=wants_new_window)
         return True, msg
 
-    # 4. Known Websites
+    # 4. Known Websites (e.g. LinkedIn, GitHub, Reddit, ChatGPT) -> opens in Chrome tab / window
     for site_key, site_url in KNOWN_WEBSITES.items():
-        if f"open {site_key}" in t or f"launch {site_key}" in t or f"go to {site_key}" in t:
-            msg = open_website(site_url, site_key.title())
+        pattern = r"\b(?:open|launch|start|go\s+to)\s+" + re.escape(site_key) + r"\b"
+        if re.search(pattern, t) or t == site_key:
+            msg = open_website(site_url, site_key.title(), new_window=wants_new_window)
             return True, msg
 
     # 5. Volume Controls
@@ -212,16 +215,19 @@ def execute_single_command(cmd_text):
         msg = minimize_all_windows()
         return True, msg
 
-    # 8. Windows Apps: "open notepad", "open calculator", "open cmd", etc.
-    app_open_match = re.search(r"(?:open|launch|start)\s+([a-zA-Z0-9_\s]+)", t)
+    # 8. Windows Apps: "open xbox app", "open whatsapp app", "open notepad", "open calculator", etc.
+    app_open_match = re.search(r"(?:open|launch|start)\s+(?:the\s+)?([a-zA-Z0-9_\s]+)", t)
     if app_open_match:
-        app_target = app_open_match.group(1).strip()
-        msg = open_windows_app(app_target)
-        return True, msg
+        raw_target = app_open_match.group(1).strip()
+        clean_target = re.sub(r"\s+in\s+(?:a\s+)?(?:new|another|separate)\s+window$", "", raw_target).strip()
+        clean_target = re.sub(r"\s+app(?:lication)?$", "", clean_target).strip()
+        ok, msg = open_windows_app(clean_target)
+        if ok:
+            return True, msg
 
     # Fallback search if phrased as a question
     if t.startswith("what is") or t.startswith("who is") or t.startswith("how to"):
-        msg = open_google_search(t)
+        msg = open_google_search(t, new_window=wants_new_window)
         return True, msg
 
     return False, f"Command not recognized: '{cmd_text}'"
@@ -273,17 +279,20 @@ def parse_and_execute(full_transcript):
     return {"ok": False, "text": detail, "speak": None, "title": "Couldn't do that"}
 
 if __name__ == "__main__":
-    samples = [
+    test_commands = [
         "open youtube",
+        "open youtube in another window",
+        "open linkedin",
+        "open linkedin in a new window",
+        "open xbox app",
+        "open whatsapp app",
+        "open whatsapp",
+        "open whatsapp web",
+        "open calculator",
         "hi",
-        "hello",
-        "hii",
-        "hey there",
-        "good morning",
-        "thanks",
-        "hi open youtube",
-        "volume up",
     ]
-    print("Interpret only (does not launch apps):")
-    for sample in samples:
-        print(f"  {sample!r} -> {interpret(sample)}")
+    print("Testing command parsing (interpret & dry run):")
+    for cmd in test_commands:
+        print(f"\nCommand: {cmd!r}")
+        plan = interpret(cmd)
+        print(f"  Interpret: {plan}")

@@ -472,7 +472,7 @@ class FloatingWidget:
             "  • 'good morning', 'thanks', 'bye', 'what can you do'\n"
             "  Actions like open YouTube stay silent.\n\n"
             "▶ YouTube Commands:\n"
-            "  • 'open youtube' (opens standalone YouTube app window)\n"
+            "  • 'open youtube' (opens in Chrome tab; add 'in another window' for new window)\n  • 'open linkedin', 'open github', 'open chatgpt'\n  • 'open xbox app', 'open whatsapp app', 'open steam'\n"
             "  • 'search [query] on youtube'\n\n"
             "▶ Chrome & Profile Commands:\n"
             "  • 'open chrome and then click my profile'\n"
