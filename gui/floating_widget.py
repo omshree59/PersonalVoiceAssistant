@@ -44,12 +44,12 @@ class FloatingWidget:
                 pass
                 
         # Widget Dimensions
-        # Extra vertical space (160px) allows the cat to jump smoothly and show ear ripples
-        self.win_w = 140
-        self.win_h = 160
-        self.base_cat_w = 96
-        self.base_cat_h = 116
-        self.ground_y = 152  # Feet baseline resting coordinate
+        # Extra vertical space allows the cat to jump smoothly and show ear ripples
+        self.win_w = 150
+        self.win_h = 175
+        self.base_cat_w = 108
+        self.base_cat_h = 130
+        self.ground_y = 166  # Feet baseline resting coordinate
         self.center_x = self.win_w // 2
         
         # Canvas
@@ -167,7 +167,7 @@ class FloatingWidget:
             return self._photo_cache[key]
             
         base = self.pil_sprites.get(sprite_name, self.pil_sprites["cat_neutral"])
-        resized = base.resize((max(10, int(width)), max(10, int(height))), Image.Resampling.BILINEAR)
+        resized = base.resize((max(10, int(width)), max(10, int(height))), Image.Resampling.LANCZOS)
         photo = ImageTk.PhotoImage(resized)
         
         # Keep cache manageable
@@ -227,16 +227,12 @@ class FloatingWidget:
                 current_sprite = "cat_ear_right"
             else:
                 current_sprite = "cat_ear_both"
-                
-            # Render Ear Listening Sound Waves / Ripples!
-            self._draw_ear_listening_waves(y_offset, energy)
 
         # --- 2. PROCESSING STATE (Head tilted, curious ears, thinking sparkles) ---
         elif self.state == self.STATE_PROCESSING:
             current_sprite = "cat_ear_both"
             # Gentle curious bob
             y_offset = -int(3.0 * math.sin(self._frame_count * 0.18))
-            self._draw_thinking_dots(y_offset)
 
         # --- 3. SUCCESS STATE (Happy celebratory bounce & blushed eyes) ---
         elif self.state == self.STATE_SUCCESS:
@@ -246,7 +242,6 @@ class FloatingWidget:
             y_offset = -int(16.0 * hop)
             scale_h = 1.0 + (0.05 * hop)
             scale_w = 1.0 - (0.04 * hop)
-            self._draw_success_sparkles(y_offset)
 
         # --- 4. IDLE STATE (Gentle breathing & natural blinking) ---
         else:
@@ -282,70 +277,81 @@ class FloatingWidget:
         self._current_photo = photo  # Prevent garbage collection
         self.canvas.create_image(draw_x, draw_y, anchor="nw", image=photo)
         
+        # Draw overlays on top of the cat
+        if self.state == self.STATE_LISTENING:
+            self._draw_ear_listening_waves(draw_x, draw_y, draw_w, draw_h, energy)
+        elif self.state == self.STATE_PROCESSING:
+            self._draw_thinking_dots(draw_x, draw_y, draw_w, draw_h)
+        elif self.state == self.STATE_SUCCESS:
+            self._draw_success_sparkles(draw_x, draw_y, draw_w, draw_h)
+        
         # Schedule next animation frame (~33ms = 30 FPS)
         self.root.after(33, self._animate)
 
-    def _draw_ear_listening_waves(self, y_offset, energy):
+    def _draw_ear_listening_waves(self, draw_x, draw_y, draw_w, draw_h, energy):
         """Draws animated listening sound ripples emitting outward from cat ears."""
         self._ear_wave_phase = (self._ear_wave_phase + 0.12) % 1.0
         
-        # Ear tip coordinates relative to canvas center
-        head_top_y = (self.ground_y - self.base_cat_h + y_offset)
-        left_ear_x = self.center_x - 22
-        right_ear_x = self.center_x + 22
-        ear_y = head_top_y + 8
+        # Precision ear tip coordinates proportional to cat bounding box (377x455)
+        left_ear_x = draw_x + int(draw_w * (68.0 / 377.0))
+        left_ear_y = draw_y + int(draw_h * (18.0 / 455.0))
+        
+        right_ear_x = draw_x + int(draw_w * (306.0 / 377.0))
+        right_ear_y = draw_y + int(draw_h * (18.0 / 455.0))
         
         # Colors: Glowing electric cyan / vibrant gold
         colors = ["#38bdf8", "#06b6d4", "#fbbf24"]
         
-        # Draw 3 expanding acoustic ripple arcs from each ear
+        # Draw 3 expanding acoustic ripple arcs from each ear tip
         for i in range(3):
             wave_prog = (self._ear_wave_phase + (i * 0.33)) % 1.0
-            r = 6 + (wave_prog * 24)
+            r = 6 + (wave_prog * 22)
             color = colors[i % len(colors)]
             width = max(1, int(3 * (1.0 - wave_prog)))
             
-            # Left ear listening arc (curving up and to the left)
+            # Left ear listening arc (curving up and outward to the left)
             self.canvas.create_arc(
-                left_ear_x - r, ear_y - r, left_ear_x + r, ear_y + r,
-                start=90, extent=130, style=tk.ARC,
+                left_ear_x - r, left_ear_y - r, left_ear_x + r, left_ear_y + r,
+                start=85, extent=125, style=tk.ARC,
                 outline=color, width=width
             )
             
-            # Right ear listening arc (curving up and to the right)
+            # Right ear listening arc (curving up and outward to the right)
             self.canvas.create_arc(
-                right_ear_x - r, ear_y - r, right_ear_x + r, ear_y + r,
-                start=-40, extent=130, style=tk.ARC,
+                right_ear_x - r, right_ear_y - r, right_ear_x + r, right_ear_y + r,
+                start=-30, extent=125, style=tk.ARC,
                 outline=color, width=width
             )
 
-    def _draw_thinking_dots(self, y_offset):
+    def _draw_thinking_dots(self, draw_x, draw_y, draw_w, draw_h):
         """Draws cute glowing thinking dots above cat head."""
-        head_top_y = (self.ground_y - self.base_cat_h + y_offset) - 6
+        head_top_y = draw_y - 6
+        center_x = draw_x + (draw_w // 2)
         
         for i in range(3):
-            dot_x = self.center_x - 14 + (i * 14)
+            dot_x = center_x - 14 + (i * 14)
             dot_y = head_top_y - int(4 * math.sin((self._frame_count * 0.25) + (i * 0.9)))
             self.canvas.create_oval(
                 dot_x - 3, dot_y - 3, dot_x + 3, dot_y + 3,
                 fill="#fbbf24", outline="#fef08a", width=1
             )
 
-    def _draw_success_sparkles(self, y_offset):
+    def _draw_success_sparkles(self, draw_x, draw_y, draw_w, draw_h):
         """Draws cheerful celebration music notes / sparkles."""
-        head_top_y = (self.ground_y - self.base_cat_h + y_offset) - 8
+        head_top_y = draw_y - 8
+        center_x = draw_x + (draw_w // 2)
         
         # Note 1 (left)
         n1_y = head_top_y - (self._frame_count % 18)
         self.canvas.create_text(
-            self.center_x - 30, n1_y,
+            center_x - 32, n1_y,
             text="♪", fill="#10b981", font=("Segoe UI", 12, "bold")
         )
         
         # Note 2 (right)
         n2_y = head_top_y - ((self._frame_count + 8) % 18)
         self.canvas.create_text(
-            self.center_x + 30, n2_y,
+            center_x + 32, n2_y,
             text="♫", fill="#34d399", font=("Segoe UI", 11, "bold")
         )
 
