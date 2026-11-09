@@ -23,7 +23,7 @@ DEFAULT_CONFIG = {
     # Chrome settings
     "chrome_path": "",                # Auto-detected if empty
     "default_profile": "Default",     # Default profile directory name
-    "youtube_app_mode": True,         # Launch YouTube as standalone app window
+    "youtube_app_mode": False,         # Launch YouTube as standalone app window
     
     # UI Floating Widget settings
     "widget_size": 70,                # Width & height in pixels
