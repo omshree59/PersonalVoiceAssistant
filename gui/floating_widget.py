@@ -29,7 +29,10 @@ class FloatingWidget:
         self.root = tk.Tk()
         self.root.title("Desktop Cat Voice Listener")
         self.root.overrideredirect(True)
-        self.root.attributes("-topmost", True)
+        # Desktop-only presence (does not hover over other apps)
+        settings = config.load_settings()
+        self.always_on_top = settings.get("always_on_top", False)
+        self.root.attributes("-topmost", self.always_on_top)
         
         # Transparent background key for Windows (only the cat is visible!)
         self.root.configure(bg=TRANSPARENT_KEY)
@@ -81,6 +84,8 @@ class FloatingWidget:
         
         # Feedback Toast Bubble
         self.bubble = FeedbackBubble(self.root)
+        if not self.always_on_top:
+            self.root.lower()
         
         # Animation State Variables
         self._frame_count = 0
@@ -159,6 +164,8 @@ class FloatingWidget:
         """Updates animation state: IDLE, LISTENING, PROCESSING, SUCCESS."""
         self.state = new_state
         self._jump_phase = 0.0
+        if new_state == self.STATE_IDLE and not getattr(self, "always_on_top", False):
+            self.root.lower()
 
     def _get_scaled_photo(self, sprite_name, width, height):
         """Resizes and caches PhotoImage for smooth performance."""
@@ -370,7 +377,7 @@ class FloatingWidget:
         
         # Always on Top toggle
         settings = config.load_settings()
-        topmost = settings.get("always_on_top", True)
+        topmost = settings.get("always_on_top", False)
         top_text = "✓ Always on Top" if topmost else "  Always on Top"
         menu.add_command(label=top_text, command=self._toggle_topmost)
         
@@ -381,10 +388,16 @@ class FloatingWidget:
 
     def _toggle_topmost(self):
         settings = config.load_settings()
-        cur = settings.get("always_on_top", True)
-        settings["always_on_top"] = not cur
+        cur = settings.get("always_on_top", False)
+        new_val = not cur
+        settings["always_on_top"] = new_val
         config.save_settings(settings)
-        self.root.attributes("-topmost", not cur)
+        self.always_on_top = new_val
+        self.root.attributes("-topmost", new_val)
+        if hasattr(self, "bubble") and hasattr(self.bubble, "window"):
+            self.bubble.window.attributes("-topmost", new_val)
+        if not new_val:
+            self.root.lower()
 
     def _show_cheat_sheet(self):
         """Pops up voice command cheat sheet."""

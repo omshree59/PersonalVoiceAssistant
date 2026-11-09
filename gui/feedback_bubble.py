@@ -8,7 +8,7 @@ class FeedbackBubble:
         self.parent = parent
         self.window = tk.Toplevel(parent)
         self.window.overrideredirect(True)
-        self.window.attributes("-topmost", True)
+        self.window.attributes("-topmost", False)
         self.window.attributes("-alpha", 0.0) # Start invisible
         
         # Windows transparent background setup

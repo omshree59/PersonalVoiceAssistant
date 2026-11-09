@@ -27,7 +27,7 @@ DEFAULT_CONFIG = {
     
     # UI Floating Widget settings
     "widget_size": 70,                # Width & height in pixels
-    "always_on_top": True,
+    "always_on_top": False,           # Only exists on desktop, never hovers over other apps
     "window_x": None,                 # Auto-centered or remembered
     "window_y": None,
     "theme": "dark_neon",
