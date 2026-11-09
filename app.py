@@ -13,11 +13,16 @@ from audio.recognizer import transcriber
 from automation.command_parser import parse_and_execute
 from feedback.tts import tts_engine
 from gui.floating_widget import FloatingWidget
+from single_instance import SingleInstanceManager
 
 class VoiceListenerApp:
     """Main Application Controller for the Desktop Voice Listener."""
     
     def __init__(self):
+        # Enforce single instance: if another instance is launched, it wakes us up and exits
+        self.single_instance = SingleInstanceManager(on_activate=self._on_remote_activate)
+        self.single_instance.acquire_lock_or_wake_existing()
+        
         self.recorder = AudioRecorder()
         self.widget = FloatingWidget(
             on_toggle_listen=self.toggle_listening,
@@ -25,6 +30,11 @@ class VoiceListenerApp:
         )
         self.listen_thread = None
         self._is_active = False
+
+    def _on_remote_activate(self):
+        """Called when user launches the app while it is already running."""
+        print("[App] Wake-up ping received from secondary launch attempt.")
+        self.widget.root.after(0, lambda: self.widget.show_in_bottom_right(smooth_wake=True))
 
     def toggle_listening(self):
         """Toggles between listening mode and idle."""
