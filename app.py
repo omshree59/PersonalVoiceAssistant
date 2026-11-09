@@ -3,12 +3,21 @@ import sys
 
 if sys.platform == "win32":
     try:
+        import ctypes
+        try:
+            ctypes.windll.shcore.SetProcessDpiAwareness(2)
+        except Exception:
+            ctypes.windll.user32.SetProcessDPIAware()
+    except Exception:
+        pass
+    try:
         if sys.stdout is not None:
             sys.stdout.reconfigure(encoding="utf-8", errors="replace")
         if sys.stderr is not None:
             sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     except Exception:
         pass
+
 import threading
 import time
 

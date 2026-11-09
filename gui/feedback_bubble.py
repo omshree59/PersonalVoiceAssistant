@@ -9,7 +9,7 @@ class FeedbackBubble:
         self.window = tk.Toplevel(parent)
         self.window.overrideredirect(True)
         self.window.attributes("-topmost", False)
-        self.window.attributes("-alpha", 0.0) # Start invisible
+        self.window.attributes("-alpha", 0.0)  # Start invisible
         
         # Windows transparent background setup
         bg_color = "#0f172a"
@@ -61,26 +61,37 @@ class FeedbackBubble:
         self.frame.configure(highlightbackground=status_color)
         self.message_label.configure(text=message)
         
-        # Position bubble right next to the floating widget
+        # Position bubble right next to the floating widget in the bottom-right corner
         self.window.update_idletasks()
         parent_x = self.parent.winfo_x()
         parent_y = self.parent.winfo_y()
-        widget_w = self.parent.winfo_width()
+        widget_w = self.parent.winfo_width() or 150
+        widget_h = self.parent.winfo_height() or 175
         
         bubble_w = self.window.winfo_reqwidth()
         bubble_h = self.window.winfo_reqheight()
         
-        screen_w = self.parent.winfo_screenwidth()
-        
-        # If widget is near right edge, place bubble to the left; otherwise to the right
-        if parent_x + widget_w + bubble_w + 20 > screen_w:
-            pos_x = parent_x - bubble_w - 12
-        else:
-            pos_x = parent_x + widget_w + 12
+        # Guard against unmapped / top-left 0,0 parent coordinates
+        if parent_x < 100 or parent_y < 100:
+            try:
+                from gui.floating_widget import get_desktop_bottom_right
+                bx, by = get_desktop_bottom_right(widget_w, widget_h)
+                if bx is not None and by is not None:
+                    parent_x = bx
+                    parent_y = by
+            except Exception:
+                pass
             
-        pos_y = parent_y + (self.parent.winfo_height() - bubble_h) // 2
+        # In bottom-right corner, toast bubble sits neatly to the LEFT of the cat
+        pos_x = parent_x - bubble_w - 14
+        pos_y = parent_y + (widget_h - bubble_h) // 2
+        
+        # Safety bound check
+        pos_x = max(10, pos_x)
+        pos_y = max(10, pos_y)
         
         self.window.geometry(f"+{pos_x}+{pos_y}")
+        self.window.update_idletasks()
         self.window.attributes("-alpha", 0.96)
         self.window.deiconify()
         self.window.lift()
