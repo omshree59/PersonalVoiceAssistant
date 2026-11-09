@@ -68,8 +68,10 @@ class FloatingWidget:
         # Load and prepare cat sprites
         self._load_sprites()
         
-        # Restore saved desktop position
-        self._init_position()
+        # Smooth opening: start invisible and show in bottom-right corner
+        self.root.attributes("-alpha", 0.0)
+        self.show_in_bottom_right(smooth_wake=False)
+        self.root.after(40, self.fade_in)
         
         # Dragging & click tracking
         self._drag_start_x = 0
@@ -130,6 +132,48 @@ class FloatingWidget:
             y = screen_h - self.win_h - 90
             
         self.root.geometry(f"{self.win_w}x{self.win_h}+{x}+{y}")
+
+    def show_in_bottom_right(self, smooth_wake=False):
+        """Positions cat strictly in the bottom-right corner of the desktop above the taskbar."""
+        self.root.update_idletasks()
+        screen_w = self.root.winfo_screenwidth()
+        screen_h = self.root.winfo_screenheight()
+        target_x = screen_w - self.win_w - 30
+        target_y = screen_h - self.win_h - 75
+        self.root.geometry(f"{self.win_w}x{self.win_h}+{target_x}+{target_y}")
+        self._save_position()
+        
+        if smooth_wake:
+            self.fade_in()
+            self.set_state(self.STATE_SUCCESS)
+            self.show_feedback("🐱 I'm here!", "Click me anytime to give a command.", color="#fbbf24", auto_hide=3.0)
+            self.root.after(1100, lambda: self.set_state(self.STATE_IDLE))
+        elif not self.always_on_top:
+            self.root.lower()
+
+    def fade_in(self, target_alpha=1.0, step=0.12):
+        """Smoothly fades in the widget window."""
+        try:
+            curr = self.root.attributes("-alpha")
+            if curr < target_alpha:
+                new_a = min(target_alpha, curr + step)
+                self.root.attributes("-alpha", new_a)
+                self.root.after(20, lambda: self.fade_in(target_alpha, step))
+        except Exception:
+            pass
+
+    def fade_out_and_exit(self, step=0.14):
+        """Smoothly fades out and exits the application."""
+        try:
+            curr = self.root.attributes("-alpha")
+            if curr > 0.08:
+                new_a = max(0.0, curr - step)
+                self.root.attributes("-alpha", new_a)
+                self.root.after(20, lambda: self.fade_out_and_exit(step))
+            else:
+                self.root.destroy()
+        except Exception:
+            self.root.destroy()
 
     def _save_position(self):
         """Saves current desktop position."""
@@ -382,7 +426,7 @@ class FloatingWidget:
         menu.add_command(label=top_text, command=self._toggle_topmost)
         
         menu.add_separator()
-        menu.add_command(label="❌ Exit Cat Listener", command=self.root.destroy)
+        menu.add_command(label="❌ Exit Cat Listener", command=self.fade_out_and_exit)
         
         menu.post(event.x_root, event.y_root)
 
