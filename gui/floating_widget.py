@@ -68,9 +68,9 @@ class FloatingWidget:
         # Load and prepare cat sprites
         self._load_sprites()
         
-        # Smooth opening: start invisible and show in bottom-right corner
+        # Smooth opening: start invisible, position at bottom-right corner, and fade in
         self.root.attributes("-alpha", 0.0)
-        self.show_in_bottom_right(smooth_wake=False)
+        self._init_position()
         self.root.after(40, self.fade_in)
         
         # Dragging & click tracking
@@ -116,32 +116,36 @@ class FloatingWidget:
                 self.pil_sprites[name] = Image.open(fallback).convert("RGBA")
 
     def _init_position(self):
-        """Loads saved position or places cat neatly at bottom-right corner of screen."""
+        """Loads saved position or defaults to the bottom-right corner of the desktop."""
         settings = config.load_settings()
         screen_w = self.root.winfo_screenwidth()
         screen_h = self.root.winfo_screenheight()
         
+        # Bottom-right corner baseline (above the Windows taskbar)
+        default_x = screen_w - self.win_w - 40
+        default_y = screen_h - self.win_h - 85
+        
         saved_x = settings.get("window_x")
         saved_y = settings.get("window_y")
         
-        if saved_x is not None and saved_y is not None:
+        # Only use saved coordinates if valid and not corrupted to 0,0
+        if saved_x is not None and saved_y is not None and saved_x > 50 and saved_y > 50:
             x = max(10, min(saved_x, screen_w - self.win_w - 10))
             y = max(10, min(saved_y, screen_h - self.win_h - 10))
         else:
-            x = screen_w - self.win_w - 45
-            y = screen_h - self.win_h - 90
+            x = default_x
+            y = default_y
             
         self.root.geometry(f"{self.win_w}x{self.win_h}+{x}+{y}")
 
     def show_in_bottom_right(self, smooth_wake=False):
         """Positions cat strictly in the bottom-right corner of the desktop above the taskbar."""
-        self.root.update_idletasks()
         screen_w = self.root.winfo_screenwidth()
         screen_h = self.root.winfo_screenheight()
-        target_x = screen_w - self.win_w - 30
-        target_y = screen_h - self.win_h - 75
+        target_x = screen_w - self.win_w - 40
+        target_y = screen_h - self.win_h - 85
         self.root.geometry(f"{self.win_w}x{self.win_h}+{target_x}+{target_y}")
-        self._save_position()
+        self._save_position(explicit_x=target_x, explicit_y=target_y)
         
         if smooth_wake:
             self.fade_in()
@@ -175,12 +179,20 @@ class FloatingWidget:
         except Exception:
             self.root.destroy()
 
-    def _save_position(self):
-        """Saves current desktop position."""
+    def _save_position(self, explicit_x=None, explicit_y=None):
+        """Saves current desktop position with guard against unmapped 0,0."""
         settings = config.load_settings()
-        settings["window_x"] = self.root.winfo_x()
-        settings["window_y"] = self.root.winfo_y()
-        config.save_settings(settings)
+        if explicit_x is not None and explicit_y is not None:
+            settings["window_x"] = explicit_x
+            settings["window_y"] = explicit_y
+            config.save_settings(settings)
+        else:
+            cur_x = self.root.winfo_x()
+            cur_y = self.root.winfo_y()
+            if cur_x > 50 and cur_y > 50:
+                settings["window_x"] = cur_x
+                settings["window_y"] = cur_y
+                config.save_settings(settings)
 
     def _on_mouse_down(self, event):
         self._drag_start_x = event.x
