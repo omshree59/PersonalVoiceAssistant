@@ -1,5 +1,14 @@
 import os
 import sys
+
+if sys.platform == "win32":
+    try:
+        if sys.stdout is not None:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        if sys.stderr is not None:
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 import threading
 import time
 
@@ -132,7 +141,7 @@ class VoiceListenerApp:
     def run(self):
         """Starts the application."""
         print("=" * 60)
-        print("  🐱 DESKTOP CAT VOICE LISTENER")
+        print("  [Cat] DESKTOP CAT VOICE LISTENER")
         print("  Click the cat anytime to have it jump and listen.")
         print("  Right-click the cat for commands guide & options.")
         print("=" * 60)
