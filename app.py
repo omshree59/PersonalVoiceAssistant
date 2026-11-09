@@ -79,21 +79,38 @@ class VoiceListenerApp:
                 return
                 
             print(f"[VoiceListener] Recognized: '{transcript}'")
-            self.widget.root.after(0, lambda: self.widget.show_feedback("⚡ Executing", f'"{transcript}"', color="#38bdf8", auto_hide=0))
-            
-            # Execute command
-            result_message = parse_and_execute(transcript)
-            
-            # Provide feedback
-            tts_engine.play_chime("success")
-            tts_engine.speak(result_message)
-            
-            # Show Success state
-            self.widget.root.after(0, lambda: self.widget.set_state(FloatingWidget.STATE_SUCCESS))
-            self.widget.root.after(0, lambda: self.widget.show_feedback("✓ Done", f"{result_message}", color="#10b981", auto_hide=4.0))
-            
-            # Return to IDLE after 1.5 seconds
-            time.sleep(1.5)
+
+            # Commands run quietly. Only greetings and small talk are spoken back.
+            result = parse_and_execute(transcript)
+            reply = result.get("speak")
+            bubble = result.get("text") or ""
+
+            if reply:
+                tts_engine.speak(reply)
+
+            if bubble:
+                color = "#10b981" if result.get("ok") else "#fbbf24"
+                title = result.get("title") or ("Assistant" if reply else "Note")
+                self.widget.root.after(
+                    0,
+                    lambda c=color, t=title, b=bubble: self.widget.show_feedback(t, b, color=c, auto_hide=4.0)
+                )
+                self.widget.root.after(
+                    0,
+                    lambda: self.widget.set_state(
+                        FloatingWidget.STATE_SUCCESS if result.get("ok") else FloatingWidget.STATE_IDLE
+                    )
+                )
+                if not result.get("ok"):
+                    tts_engine.play_chime("error")
+            elif result.get("ok"):
+                # Action succeeded: no toast and no voice repeating the command.
+                self.widget.root.after(0, lambda: self.widget.set_state(FloatingWidget.STATE_SUCCESS))
+            else:
+                self.widget.root.after(0, lambda: self.widget.set_state(FloatingWidget.STATE_IDLE))
+                tts_engine.play_chime("error")
+
+            time.sleep(1.2 if reply else 0.6)
             self.widget.root.after(0, lambda: self.widget.set_state(FloatingWidget.STATE_IDLE))
             
         except Exception as e:

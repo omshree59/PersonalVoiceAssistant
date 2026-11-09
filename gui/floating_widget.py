@@ -384,7 +384,7 @@ class FloatingWidget:
         """Pops up voice command cheat sheet."""
         sheet = tk.Toplevel(self.root)
         sheet.title("Voice Commands Guide")
-        sheet.geometry("450x420")
+        sheet.geometry("450x500")
         sheet.configure(bg="#0f172a")
         sheet.attributes("-topmost", True)
         
@@ -392,6 +392,10 @@ class FloatingWidget:
         title.pack()
         
         commands_text = (
+            "▶ Assistant (speaks and shows text):\n"
+            "  • 'hi' / 'hello' / 'hey' → Hi, how can I help you?\n"
+            "  • 'good morning', 'thanks', 'bye', 'what can you do'\n"
+            "  Actions like open YouTube stay silent.\n\n"
             "▶ YouTube Commands:\n"
             "  • 'open youtube' (opens standalone YouTube app window)\n"
             "  • 'search [query] on youtube'\n\n"
